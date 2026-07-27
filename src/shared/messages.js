@@ -13,6 +13,7 @@ export const MSG = {
 	PROXY_FETCH: 'PROXY_FETCH',
 	WHOAMI: 'WHOAMI',
 	LIST_FRIENDS: 'LIST_FRIENDS',
+	FRIENDS_CHUNK: 'FRIENDS_CHUNK',
 	GET_USER_CARDS: 'GET_USER_CARDS',
 	RESOLVE_USERNAMES: 'RESOLVE_USERNAMES',
 	SAVE_SETTINGS: 'SAVE_SETTINGS',
@@ -23,6 +24,9 @@ export const MSG = {
 export const JOB = {
 	ACCEPT: 'accept',
 	UNFRIEND: 'unfriend',
+	// Started by the extension itself, not the popup: on a timer and after an accept
+	// run. See background/jobs/auto-trim.js.
+	AUTO_TRIM: 'auto-trim',
 };
 
 export const STATUS = {

@@ -24,9 +24,51 @@ export class NoRobloxTabError extends Error {
 }
 
 /**
- * @typedef {{status:number, ok:boolean, csrfToken:string|null, retryAfter:string|null, text:string}
+ * @typedef {{remaining:number|null, resetSeconds:number|null, limit:string|null}} RateLimitInfo
+ * @typedef {{status:number, ok:boolean, csrfToken:string|null, retryAfter:string|null,
+ *            rateLimit:RateLimitInfo|null, text:string}
  *           | {networkError:string}} TransportResponse
  */
+
+/**
+ * Roblox sends one x-ratelimit-* header per bucket, and fetch joins duplicates
+ * into a single comma-separated string. Values may also carry IETF policy syntax
+ * ("1000;w=1" = 1000 per 1s window). A real 429 response looks like:
+ *
+ *   x-ratelimit-limit:     1000, 1000;w=1, 1000;w=1, 70000
+ *   x-ratelimit-remaining: 999, 70000
+ *   x-ratelimit-reset:     1, 0
+ *
+ * Only three things are worth extracting: the tightest remaining budget, the
+ * longest reset, and the raw limit text for the log.
+ */
+export function parseRateLimit(headers) {
+	const limit = headers.get('x-ratelimit-limit');
+	const remainingRaw = headers.get('x-ratelimit-remaining');
+	const resetRaw = headers.get('x-ratelimit-reset');
+	if (!limit && !remainingRaw && !resetRaw) return null;
+
+	// "999, 70000" -> [999, 70000]; "1000;w=1" -> [1000]; missing -> [].
+	// The empty-string filter matters: Number('') is 0, so without it an absent
+	// header would read as a real budget of zero rather than "unknown".
+	const numbers = (value) =>
+		String(value || '')
+			.split(',')
+			.map((part) => part.trim().split(';')[0].trim())
+			.filter((part) => part !== '')
+			.map(Number)
+			.filter((n) => Number.isFinite(n));
+
+	const remaining = numbers(remainingRaw);
+	const reset = numbers(resetRaw);
+	return {
+		// The bucket closest to empty is the one that will reject us.
+		remaining: remaining.length ? Math.min(...remaining) : null,
+		// The longest window is the safest thing to wait out.
+		resetSeconds: reset.length ? Math.max(...reset) : null,
+		limit: limit || null,
+	};
+}
 
 async function directSend(request) {
 	try {
@@ -35,13 +77,16 @@ async function directSend(request) {
 			headers: request.headers || {},
 			body: request.body ?? null,
 			mode: 'cors',
-			credentials: 'include',
+			// 'omit' is used for third-party mirrors, which must never see a cookie.
+			credentials: request.credentials || 'include',
+			signal: request.signal,
 		});
 		return {
 			status: res.status,
 			ok: res.ok,
 			csrfToken: res.headers.get('x-csrf-token'),
 			retryAfter: res.headers.get('retry-after'),
+			rateLimit: parseRateLimit(res.headers),
 			text: await res.text(),
 		};
 	} catch (err) {
@@ -84,6 +129,20 @@ export async function getTransport() {
 	}
 	return mode === 'direct' ? directSend : proxySend;
 }
+
+/**
+ * The service worker's own fetch, bypassing the transport probe entirely.
+ *
+ * Used for owned-proxy hosts: session-free calls omit credentials; authenticated
+ * mutation calls still use omit here because .ROBLOSECURITY is injected onto the
+ * proxy request via declarativeNetRequest (see credentials.js).
+ */
+export function sendWithoutCredentials(request) {
+	return directSend({ ...request, credentials: 'omit' });
+}
+
+/** Alias for clarity at authenticated-proxy call sites. Same wire path. */
+export const sendViaOwnedProxy = sendWithoutCredentials;
 
 export function transportMode() {
 	return mode;

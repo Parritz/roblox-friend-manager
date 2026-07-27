@@ -1,4 +1,0 @@
-# Live proxy credentials and the relay key never belong in the repo.
-proxies.txt
-.env
-node_modules/

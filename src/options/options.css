@@ -87,6 +87,10 @@ header {
 
 /* -- pacing fields --------------------------------------------------------- */
 
+.section-head-spaced {
+	margin-top: 28px;
+}
+
 .field {
 	display: flex;
 	align-items: center;

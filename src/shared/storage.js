@@ -16,12 +16,42 @@ export const DEFAULT_SETTINGS = {
 	// Starting pace. The limiter adapts up from here on 429s and creeps back down
 	// after sustained success, so this is a seed value, not a hard rule.
 	baseDelayMs: 1500,
+
 	// Never go faster than this, no matter how well things are going.
 	floorDelayMs: 800,
+
 	// Never go slower than this from adaptation alone (429 backoff can still be longer).
 	ceilDelayMs: 15000,
+
+	// Reads (friend lists, name lookups, avatars) get their own, much faster pace.
+	// They aren't what Roblox pushes back on: observed 429s arrive with the global
+	// budget almost untouched, so they come from a per-endpoint limit on the
+	// mutating calls. At this pace a 1000-friend keep-list load is ~29 requests in
+	// well under 10s instead of a minute. It adapts upward on a 429 like any other
+	// pace, so if reads ever do get limited, this corrects itself.
+	readDelayMs: 300,
+
 	// Retries for 5xx / network errors before an item is marked failed.
 	maxRetries: 3,
+
+	// Route name/avatar lookups and accept/unfriend through the owned Workers
+	// proxies (with roblox.com failover). Lookups stay session-free; friend
+	// actions forward .ROBLOSECURITY + CSRF. Friends list reads never go through
+	// the proxy. See background/roproxy.js and credentials.js.
+	useProxyForPublic: true,
+
+	// Auto-trim keeps the friend count under a ceiling on its own. Off by default:
+	// it removes people without asking each time, so turning it on is a deliberate
+	// choice. The keep-list is always honoured. See background/jobs/auto-trim.js for
+	// what "oldest" can and can't mean given Roblox exposes no friendship dates.
+	autoTrimEnabled: false,
+
+	// Trim once Roblox reports at least this many friends. 1000 is the cap, so the
+	// default leaves headroom to still accept requests.
+	autoTrimThreshold: 900,
+
+	// How many to remove per run.
+	autoTrimCount: 100,
 };
 
 export function emptyJobState() {
@@ -36,9 +66,25 @@ export function emptyJobState() {
 		keptCount: 0,
 		// Remaining unfriend targets: [{ id, name }]. null until a scan has run.
 		queue: null,
+		// Cached from the scan so a re-scan after eviction doesn't re-ask who we are.
+		userId: null,
 		// Friend-request ids already attempted this run, so a permanently failing
 		// request can't be re-enqueued forever.
 		processedIds: [],
+		// Accept job only: armed to keep watching for new requests rather than
+		// finishing when the queue empties. Persisted because it has to survive a
+		// service-worker eviction - see resumeIfNeeded.
+		watching: false,
+		// When the watch loop will next look, while it is idling between polls.
+		nextCheckAt: null,
+		// Set to a JOB value while an armed accept session has stood aside for
+		// something more important - currently only auto-trim. The accept job is
+		// still running and still armed; it is just not accepting right now.
+		pausedFor: null,
+		// Progress of whatever pausedFor names, as { done, total }. Kept apart from
+		// the job's own counters: friends removed and requests accepted are
+		// different things and averaging them into one bar means neither is true.
+		subProgress: null,
 		rateLimitHits: 0,
 		currentDelayMs: DEFAULT_SETTINGS.baseDelayMs,
 		backoffUntil: null,

@@ -9,8 +9,16 @@
 		"48": "assets/icon-48.png",
 		"128": "assets/icon-128.png"
 	},
-	"permissions": ["storage", "alarms", "scripting"],
-	"host_permissions": ["*://*.roblox.com/*"],
+	"permissions": ["storage", "alarms", "scripting", "cookies", "declarativeNetRequestWithHostAccess"],
+	"host_permissions": [
+		"*://*.roblox.com/*",
+		"https://delicate-frost-56e9.parritz.workers.dev/*",
+		"https://gentle-poetry-8595.parritz.workers.dev/*",
+		"https://young-violet-d81f.parritz.workers.dev/*",
+		"https://jolly-darkness-8177.parritz.workers.dev/*",
+		"https://proxy.projectsoda.com/*"
+	],
+	"optional_host_permissions": ["http://*/*", "https://*/*"],
 	"content_security_policy": {
 		"extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' data: https://*.rbxcdn.com https://*.roblox.com;"
 	},

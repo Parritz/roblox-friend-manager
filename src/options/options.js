@@ -3,7 +3,9 @@ import { initTheme, themeSwitchHtml } from '../shared/theme.js';
 
 const $ = (id) => document.getElementById(id);
 /** Delay settings are stored as ms; the options UI edits them in seconds. */
-const DELAY_FIELDS = ['baseDelayMs', 'floorDelayMs', 'ceilDelayMs'];
+const DELAY_FIELDS = ['baseDelayMs', 'floorDelayMs', 'ceilDelayMs', 'readDelayMs'];
+/** Plain integer settings, stored exactly as typed. */
+const COUNT_FIELDS = ['maxRetries', 'autoTrimThreshold', 'autoTrimCount'];
 const SAVE_DEBOUNCE_MS = 400;
 
 /**
@@ -22,6 +24,10 @@ let saveTimer = null;
 let friendsLoaded = false;
 /** Guards against overlapping loads from the refresh button and the Retry link. */
 let loadingFriends = false;
+/** Roblox's friend total for the load in flight, once known. */
+let expectedFriends = null;
+/** Coalesces the many small renders a streaming load would otherwise trigger. */
+let renderQueued = false;
 
 function send(message) {
 	return chrome.runtime.sendMessage(message);
@@ -46,7 +52,9 @@ function personRow(person) {
 	// A <label> wrapper means the whole row toggles, not just the 16px box.
 	const row = document.createElement('label');
 	row.className = 'user-row';
-	if (!person.resolved) row.classList.add('is-unresolved');
+	// `pending` means the id is known and the name is still on its way, which is
+	// not the same as a lookup that failed - don't mark it as a problem.
+	if (!person.resolved && !person.pending) row.classList.add('is-unresolved');
 
 	const box = document.createElement('input');
 	box.type = 'checkbox';
@@ -74,16 +82,15 @@ function personRow(person) {
 
 	const display = document.createElement('span');
 	display.className = 'user-display';
-	display.textContent = person.resolved
-		? person.displayName || person.name
-		: `Unknown user ${person.id}`;
+	if (person.resolved) display.textContent = person.displayName || person.name;
+	else display.textContent = person.pending ? `User ${person.id}` : `Unknown user ${person.id}`;
 
 	const sub = document.createElement('span');
 	sub.className = 'user-sub';
 	if (person.resolved) {
 		sub.append(`@${person.name}`, ' · ');
 	} else {
-		sub.append('name unavailable', ' · ');
+		sub.append(person.pending ? 'looking up name...' : 'name unavailable', ' · ');
 	}
 	const id = document.createElement('span');
 	id.className = 'user-id';
@@ -191,7 +198,7 @@ function showNotice(text, { isError = false, retry = false, steps = [] } = {}) {
 		const button = document.createElement('button');
 		button.className = 'btn-sm user-spacer';
 		button.textContent = 'Retry';
-		button.addEventListener('click', loadFriends);
+		button.addEventListener('click', () => loadFriends());
 		notice.appendChild(button);
 	}
 }
@@ -229,9 +236,67 @@ function sortPeople() {
 
 // -- loading ----------------------------------------------------------------------
 
-async function loadFriends() {
+/** Batched re-render, so a 20-page stream doesn't rebuild the list 20 times. */
+function queueRender() {
+	if (renderQueued) return;
+	renderQueued = true;
+	requestAnimationFrame(() => {
+		renderQueued = false;
+		sortPeople();
+		render();
+	});
+}
+
+/**
+ * A partial result pushed mid-load by the service worker.
+ *
+ * 'list' carries ids (with names only for the first 200, which /friends gives
+ * away free); 'details' carries names and avatars as the lookup batches land.
+ */
+function applyFriendsChunk({ stage, friends, expected }) {
+	if (!loadingFriends || !Array.isArray(friends) || !friends.length) return;
+
+	if (stage === 'list' && Number.isFinite(expected)) expectedFriends = expected;
+	cacheAvatars(friends);
+
+	for (const card of friends) {
+		const named = Boolean(card.name) && card.resolved !== false;
+		upsertPerson({
+			...card,
+			isFriend: true,
+			resolved: card.resolved ?? named,
+			// A row from the list stage with no name yet is waiting on a lookup, not
+			// broken. The details stage clears this either way.
+			pending: stage === 'list' ? !named : false,
+		});
+	}
+
+	// Something real is on screen now, so stop showing skeletons.
+	friendsLoaded = true;
+	// One message for both stages. They interleave, so switching wording per stage
+	// would just flicker between two lines every few seconds.
+	const shown = people.filter((p) => p.isFriend).length;
+	const waiting = people.filter((p) => p.isFriend && p.pending).length;
+	showNotice(
+		`Loading your friends list... ${shown}${expectedFriends ? ` of ${expectedFriends}` : ''}` +
+			(waiting ? ` (${waiting} still resolving)` : '')
+	);
+	queueRender();
+}
+
+chrome.runtime.onMessage.addListener((msg) => {
+	if (msg?.type === MSG.FRIENDS_CHUNK) applyFriendsChunk(msg);
+});
+
+/**
+ * @param {{force?:boolean}} [opts] force skips the cached names and avatars and
+ *        re-reads everything from Roblox. That is what the refresh button is for;
+ *        opening the page, or retrying after an error, reuses the cache.
+ */
+async function loadFriends({ force = false } = {}) {
 	if (loadingFriends) return;
 	loadingFriends = true;
+	expectedFriends = null;
 
 	const refresh = $('btn-refresh');
 	refresh.classList.add('is-spinning');
@@ -239,17 +304,19 @@ async function loadFriends() {
 
 	friendsLoaded = false;
 	render();
-	// This goes through the paced limiter, so it takes a few seconds. Say so
-	// rather than leaving the stored keep-list looking like the whole answer.
+	// Rows stream in via FRIENDS_CHUNK as they're read, so this notice is only what
+	// shows before the first page lands.
 	showNotice('Loading your friends list...');
 
 	try {
-		const res = await send({ type: MSG.LIST_FRIENDS });
+		const res = await send({ type: MSG.LIST_FRIENDS, refresh: force });
 		if (res?.error) throw new Error(res.error);
 
 		const friends = res.friends || [];
 		cacheAvatars(friends);
-		for (const card of friends) upsertPerson({ ...card, isFriend: true });
+		// The authoritative pass: clears `pending` on everyone, including the rows
+		// whose lookups genuinely failed.
+		for (const card of friends) upsertPerson({ ...card, isFriend: true, pending: false });
 
 		// Reconcile, so a refresh reflects reality rather than only ever growing:
 		// anyone no longer in the list loses the friend flag, and anyone who is
@@ -263,9 +330,16 @@ async function loadFriends() {
 		render();
 
 		hideNotice();
-		reportDiagnostics(res.diagnostics, friends.length);
+		reportDiagnostics(res.diagnostics, friends.length, {
+			expected: res.expected,
+			complete: res.complete,
+			unlistable: res.unlistable,
+		});
 	} catch (err) {
 		friendsLoaded = true; // stop the skeletons; show what we do have
+		// Whatever streamed in is all we're getting, so no row should still claim a
+		// lookup is on its way.
+		for (const person of people) person.pending = false;
 		render();
 		showNotice(`Could not load your friends list: ${err.message}`, {
 			isError: true,
@@ -279,13 +353,13 @@ async function loadFriends() {
 }
 
 /** Enriches keep-list entries that aren't in the friends list. */
-async function enrichStrays() {
+async function enrichStrays({ force = false } = {}) {
 	const strays = people
 		.filter((p) => !p.isFriend && (!p.resolved || !(p.avatarUrl || avatarCache.has(p.id))))
 		.map((p) => p.id);
 	if (!strays.length) return;
 	try {
-		const res = await send({ type: MSG.GET_USER_CARDS, userIds: strays });
+		const res = await send({ type: MSG.GET_USER_CARDS, userIds: strays, refresh: force });
 		if (res?.error || !res?.cards) return;
 		cacheAvatars(res.cards);
 		for (const card of res.cards) upsertPerson({ ...card, isFriend: false });
@@ -296,20 +370,36 @@ async function enrichStrays() {
 	}
 }
 
-function reportDiagnostics(diagnostics, total) {
+function reportDiagnostics(diagnostics, total, { expected = null, complete = null, unlistable = 0 } = {}) {
 	if (!diagnostics) return;
 	const problems = [];
+	const notes = [];
+
+	// A gap between the friend count and the list is usually not a fault to fix.
+	// Roblox counts friendships with deleted and moderated accounts but won't return
+	// them from either list endpoint, so the shortfall is permanent - saying "only
+	// 768 could be listed" in red on every load just trains you to ignore notices.
+	if (complete === false && unlistable > 0) {
+		notes.push(
+			`${unlistable} of ${expected} friends can't be listed by Roblox` +
+				' (usually deleted or moderated accounts). Everything else is here.'
+		);
+	}
 	if (diagnostics.unresolved) {
 		problems.push(`${diagnostics.unresolved} of ${total} names could not be loaded`);
 	}
 	if (!diagnostics.thumbsOk) problems.push('avatars are unavailable');
-	if (!problems.length) return;
 
-	showNotice(`${problems.join(' and ')}. Each lookup reported:`, {
-		isError: Boolean(diagnostics.unresolved),
-		retry: true,
-		steps: diagnostics.steps || [],
-	});
+	if (problems.length) {
+		showNotice(`${problems.join(' and ')}. Each lookup reported:`, {
+			isError: true,
+			retry: true,
+			steps: diagnostics.steps || [],
+		});
+		return;
+	}
+	// Informational only: no error styling, and no Retry, because retrying can't help.
+	if (notes.length) showNotice(notes.join(' '), { isError: false, retry: false });
 }
 
 // -- wiring -------------------------------------------------------------------------
@@ -329,8 +419,10 @@ $('btn-select-none').addEventListener('click', () => {
 });
 
 $('btn-refresh').addEventListener('click', async () => {
-	await loadFriends();
-	await enrichStrays();
+	// The one place that deliberately ignores the cache: pressing refresh is how you
+	// say "someone changed their username" or "this looks wrong".
+	await loadFriends({ force: true });
+	await enrichStrays({ force: true });
 });
 
 $('btn-add-username').addEventListener('click', async () => {
@@ -376,7 +468,15 @@ $('username-input').addEventListener('keydown', (e) => {
 });
 
 $('btn-save').addEventListener('click', async () => {
-	const settings = { maxRetries: Number($('maxRetries').value) };
+	const settings = {
+		autoTrimEnabled: $('autoTrimEnabled').checked,
+		useProxyForPublic: $('useProxyForPublic').checked,
+	};
+
+	for (const field of COUNT_FIELDS) {
+		settings[field] = Math.round(Number($(field).value));
+	}
+
 	for (const field of DELAY_FIELDS) {
 		settings[field] = Math.round(Number($(field).value) * 1000);
 	}
@@ -388,6 +488,30 @@ $('btn-save').addEventListener('click', async () => {
 	if (settings.ceilDelayMs < settings.baseDelayMs) {
 		flash($('save-status'), 'Slowest delay cannot be below the starting delay.', 5000);
 		return;
+	}
+	if (!(settings.readDelayMs > 0)) {
+		flash($('save-status'), 'Lookup delay must be greater than zero.', 5000);
+		return;
+	}
+	// Auto-trim removes people without asking, so refuse nonsense rather than
+	// interpreting it generously.
+	if (settings.autoTrimEnabled) {
+		if (!(settings.autoTrimThreshold >= 1)) {
+			flash($('save-status'), 'Auto-trim threshold must be at least 1 friend.', 5000);
+			return;
+		}
+		if (!(settings.autoTrimCount >= 1)) {
+			flash($('save-status'), 'Auto-trim has to remove at least 1 friend.', 5000);
+			return;
+		}
+		if (settings.autoTrimCount > settings.autoTrimThreshold) {
+			flash(
+				$('save-status'),
+				'Auto-trim would remove more than the threshold. Lower the number to remove.',
+				6000
+			);
+			return;
+		}
 	}
 
 	await send({ type: MSG.SAVE_SETTINGS, settings });
@@ -416,8 +540,10 @@ initTheme();
 	}
 	sortPeople();
 
-	$('maxRetries').value = snapshot.settings.maxRetries;
+	for (const field of COUNT_FIELDS) $(field).value = snapshot.settings[field];
 	for (const field of DELAY_FIELDS) $(field).value = snapshot.settings[field] / 1000;
+	$('autoTrimEnabled').checked = Boolean(snapshot.settings.autoTrimEnabled);
+	$('useProxyForPublic').checked = Boolean(snapshot.settings.useProxyForPublic);
 
 	await loadFriends();
 	await enrichStrays();

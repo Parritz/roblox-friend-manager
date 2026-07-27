@@ -37,9 +37,18 @@ function send(message) {
 function render({ state, log, keepList }) {
 	const active = ACTIVE_STATUSES.includes(state.status);
 	const awaiting = state.status === STATUS.AWAITING_CONFIRM;
+	// The accept button is a toggle, so while its own job is running it stays
+	// enabled and turns into the off switch. Any *other* active job disables it.
+	const accepting = active && state.jobType === JOB.ACCEPT;
 
 	el.keepNote.textContent = keepList.length ? `(keeping ${keepList.length})` : '(keeping none)';
-	el.accept.disabled = active || awaiting;
+	el.accept.textContent = accepting
+		? 'Stop accepting friend requests'
+		: 'Start accepting friend requests';
+	el.accept.classList.toggle('btn-primary', !accepting);
+	el.accept.classList.toggle('btn-ghost', accepting);
+	el.accept.classList.toggle('is-watching', accepting);
+	el.accept.disabled = (active && !accepting) || awaiting;
 	el.unfriend.disabled = active || awaiting;
 
 	el.confirm.classList.toggle('hidden', !awaiting);
@@ -52,16 +61,45 @@ function render({ state, log, keepList }) {
 	el.progress.classList.toggle('hidden', !active);
 	if (active) {
 		const attempted = state.done + state.skipped + state.failed;
-		const pct = state.total > 0 ? Math.min(100, (attempted / state.total) * 100) : 0;
-		el.barFill.style.width = `${pct}%`;
 
 		const counts = [`${state.done} done`];
 		if (state.skipped) counts.push(`${state.skipped} skipped`);
 		if (state.failed) counts.push(`${state.failed} failed`);
-		el.progressText.textContent =
-			state.status === STATUS.SCANNING
-				? 'Reading your friends list...'
-				: `${attempted} / ${state.total || '?'}  ·  ${counts.join(', ')}`;
+
+		// Accepting has stood aside for something else. The bar follows that instead:
+		// the accept totals are frozen for the duration, so tracking them would show a
+		// stalled bar during the one part of the run that is actually moving.
+		const yielded = state.pausedFor === JOB.AUTO_TRIM;
+		const sub = state.subProgress;
+		// While the watch loop is idling there is no work in flight to measure, so
+		// the bar would just sit at whatever it reached. Say what it's actually doing.
+		const untilCheck = state.nextCheckAt ? state.nextCheckAt - Date.now() : 0;
+
+		const pct = yielded
+			? sub?.total > 0
+				? Math.min(100, (sub.done / sub.total) * 100)
+				: 0
+			: state.total > 0
+				? Math.min(100, (attempted / state.total) * 100)
+				: 0;
+		el.barFill.style.width = `${pct}%`;
+
+		if (yielded) {
+			const detail = sub?.total
+				? `${sub.done} / ${sub.total} removed`
+				: state.message || 'starting';
+			el.progressText.textContent = `Accepting paused · auto-trim: ${detail}`;
+		} else if (state.status === STATUS.SCANNING) {
+			el.progressText.textContent = 'Reading your friends list...';
+		} else if (untilCheck > 0) {
+			el.progressText.textContent =
+				`Watching - next check in ${Math.ceil(untilCheck / 1000)}s  ·  ${counts.join(', ')}`;
+		} else {
+			el.progressText.textContent =
+				`${attempted} / ${state.total || '?'}  ·  ${counts.join(', ')}`;
+		}
+		el.barFill.classList.toggle('idle', !yielded && untilCheck > 0);
+		el.progressText.classList.toggle('is-yielded', yielded);
 
 		el.pace.textContent = `1 request per ${(state.currentDelayMs / 1000).toFixed(1)}s` +
 			(state.rateLimitHits ? `  ·  ${state.rateLimitHits} rate-limit pause(s)` : '');
@@ -136,7 +174,13 @@ async function showWho() {
 // -- wiring ------------------------------------------------------------------
 
 el.accept.addEventListener('click', async () => {
-	await send({ type: MSG.START_JOB, jobType: JOB.ACCEPT });
+	// Read the state rather than trusting the label: the popup polls, so the job
+	// could have paused itself between the last render and this click.
+	const snapshot = await send({ type: MSG.GET_STATE });
+	const accepting =
+		ACTIVE_STATUSES.includes(snapshot?.state?.status) && snapshot.state.jobType === JOB.ACCEPT;
+
+	await send(accepting ? { type: MSG.STOP_JOB } : { type: MSG.START_JOB, jobType: JOB.ACCEPT, watch: true });
 	refresh();
 });
 

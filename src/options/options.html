@@ -56,11 +56,13 @@
 				</div>
 				<p class="sub section-hint">
 					The extension speeds up and slows down on its own based on Roblox's
-					responses. These are the bounds it works within.
+					responses. These are the bounds it works within. Removing and accepting
+					friends is paced cautiously; simply reading lists and names is not, since
+					that isn't what Roblox pushes back on.
 				</p>
 
 				<div class="field">
-					<label for="baseDelayMs">Starting delay between requests</label>
+					<label for="baseDelayMs">Starting delay between friend changes</label>
 					<span class="input-unit">
 						<input id="baseDelayMs" type="number" min="0.2" step="0.1" />
 						<span class="unit">s</span>
@@ -81,6 +83,22 @@
 					</span>
 				</div>
 				<div class="field">
+					<label for="readDelayMs">Delay between list and name lookups</label>
+					<span class="input-unit">
+						<input id="readDelayMs" type="number" min="0.05" step="0.05" />
+						<span class="unit">s</span>
+					</span>
+				</div>
+				<div class="field">
+					<label for="useProxyForPublic">Use owned proxies for lookups and friend actions</label>
+					<input id="useProxyForPublic" type="checkbox" class="check" />
+				</div>
+				<p class="sub section-hint">
+					Requests can go through your Cloudflare
+					Workers proxies, with failover across proxies and roblox.com on timeout or
+					rate limits. This helps remedy rate limiting.
+				</p>
+				<div class="field">
 					<label for="maxRetries">Retries on server or network errors</label>
 					<span class="input-unit">
 						<input id="maxRetries" type="number" min="0" max="10" step="1" />
@@ -88,8 +106,35 @@
 					</span>
 				</div>
 
+				<div class="section-head section-head-spaced">
+					<h2>Auto-trim</h2>
+				</div>
+				<p class="sub section-hint">
+					Removes friends on its own once you get close to your set limit. The keep-list is always excluded, and it never
+					removes more than the number below in one run.
+				</p>
+
+				<div class="field">
+					<label for="autoTrimEnabled">Trim automatically</label>
+					<input id="autoTrimEnabled" type="checkbox" class="check" />
+				</div>
+				<div class="field">
+					<label for="autoTrimThreshold">Start trimming at this many friends</label>
+					<span class="input-unit">
+						<input id="autoTrimThreshold" type="number" min="1" max="1000" step="10" />
+						<span class="unit"></span>
+					</span>
+				</div>
+				<div class="field">
+					<label for="autoTrimCount">Remove this many each time</label>
+					<span class="input-unit">
+						<input id="autoTrimCount" type="number" min="1" max="1000" step="10" />
+						<span class="unit"></span>
+					</span>
+				</div>
+
 				<div class="add-row">
-					<button id="btn-save" class="btn-primary">Save pacing</button>
+					<button id="btn-save" class="btn-primary">Save settings</button>
 					<span id="save-status" class="sub"></span>
 				</div>
 			</section>

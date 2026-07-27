@@ -43,10 +43,38 @@
 				// unstamped POST. Surfacing it here is what makes token rotation free.
 				csrfToken: res.headers.get('x-csrf-token'),
 				retryAfter: res.headers.get('retry-after'),
+				rateLimit: parseRateLimit(res.headers),
 				text: await res.text(),
 			};
 		} catch (err) {
 			return { networkError: String((err && err.message) || err) };
 		}
+	}
+
+	// Mirror of parseRateLimit in src/background/transport.js. Content scripts are
+	// not modules, so it can't be imported - keep the two in step.
+	function parseRateLimit(headers) {
+		const limit = headers.get('x-ratelimit-limit');
+		const remainingRaw = headers.get('x-ratelimit-remaining');
+		const resetRaw = headers.get('x-ratelimit-reset');
+		if (!limit && !remainingRaw && !resetRaw) return null;
+
+		// Number('') is 0, so empty parts must go before the Number() pass or an
+		// absent header reads as a budget of zero.
+		const numbers = (value) =>
+			String(value || '')
+				.split(',')
+				.map((part) => part.trim().split(';')[0].trim())
+				.filter((part) => part !== '')
+				.map(Number)
+				.filter((n) => Number.isFinite(n));
+
+		const remaining = numbers(remainingRaw);
+		const reset = numbers(resetRaw);
+		return {
+			remaining: remaining.length ? Math.min(...remaining) : null,
+			resetSeconds: reset.length ? Math.max(...reset) : null,
+			limit: limit || null,
+		};
 	}
 })();

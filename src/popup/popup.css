@@ -43,6 +43,31 @@ header {
 	content: ' ';
 }
 
+/* Accept is a toggle, and "armed but idle between polls" looks identical to
+   "doing nothing" without a marker. The dot is that marker. */
+.is-watching::before {
+	content: '';
+	display: inline-block;
+	width: 7px;
+	height: 7px;
+	margin-right: 7px;
+	border-radius: 50%;
+	background: var(--primary);
+	animation: watch-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes watch-pulse {
+	50% {
+		opacity: 0.25;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.is-watching::before {
+		animation: none;
+	}
+}
+
 .row {
 	display: flex;
 	gap: 6px;
@@ -82,6 +107,20 @@ header {
 	border-radius: 2px;
 	background: var(--primary);
 	transition: width 220ms ease;
+}
+
+/* Watch loop is between polls: the bar isn't stalled, there's just nothing to
+   measure until the next check. */
+#bar-fill.idle {
+	opacity: 0.45;
+}
+
+/* Accepting has stood aside for another job - worth being obvious about, since
+   the numbers on screen stop being about accepting. Not .warn's red: nothing has
+   gone wrong, the run has just changed what it's doing. */
+.is-yielded {
+	color: var(--primary);
+	font-weight: 500;
 }
 
 .wide {
