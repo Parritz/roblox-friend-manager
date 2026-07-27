@@ -46,9 +46,8 @@ export const DEFAULT_SETTINGS = {
 	// what "oldest" can and can't mean given Roblox exposes no friendship dates.
 	autoTrimEnabled: false,
 
-	// Trim once Roblox reports at least this many friends. 1000 is the cap, so the
-	// default leaves headroom to still accept requests.
-	autoTrimThreshold: 900,
+	// Trim once Roblox reports at least this many friends. Default is the Roblox cap.
+	autoTrimThreshold: 1000,
 
 	// How many to remove per run.
 	autoTrimCount: 100,
