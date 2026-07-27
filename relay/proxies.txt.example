@@ -1,0 +1,5 @@
+# One proxy per line, in Webshare's "Download as txt" format:
+#   host:port:username:password
+# Blank lines and #-comments are ignored.
+203.0.113.10:6754:username:password
+203.0.113.11:7684:username:password
