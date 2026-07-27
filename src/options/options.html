@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<link rel="stylesheet" href="../shared/ui.css" />
+		<link rel="stylesheet" href="options.css" />
+		<title>Friend Manager - Settings</title>
+	</head>
+	<body>
+		<div class="page">
+			<header>
+				<h1>Friend Manager</h1>
+				<div id="theme-slot"></div>
+			</header>
+
+			<section class="section">
+				<div class="section-head">
+					<h2>Keep-list</h2>
+					<span id="keep-count" class="sub"></span>
+				</div>
+				<p class="sub section-hint">
+					Ticked people are never unfriended. Changes save as you make them.
+				</p>
+
+				<div id="notice" class="notice hidden"></div>
+
+				<div class="list-tools">
+					<input id="filter" type="search" placeholder="Filter by name, @username or ID" />
+					<button id="btn-select-all" class="btn-sm">Select all</button>
+					<button id="btn-select-none" class="btn-sm">Clear</button>
+					<button
+						id="btn-refresh"
+						class="icon-btn"
+						title="Refresh friends list"
+						aria-label="Refresh friends list"
+					>
+						<svg viewBox="0 0 24 24" aria-hidden="true">
+							<path d="M21 12a9 9 0 1 1-2.64-6.36" />
+							<path d="M21 3.5V9.5h-6" />
+						</svg>
+					</button>
+				</div>
+
+				<div id="people" class="people"></div>
+
+				<div class="add-row">
+					<input id="username-input" type="text" placeholder="Add someone by username" />
+					<button id="btn-add-username" class="btn-primary">Add</button>
+					<span id="add-status" class="sub"></span>
+				</div>
+			</section>
+
+			<section class="section">
+				<div class="section-head">
+					<h2>Pacing</h2>
+				</div>
+				<p class="sub section-hint">
+					The extension speeds up and slows down on its own based on Roblox's
+					responses. These are the bounds it works within.
+				</p>
+
+				<div class="field">
+					<label for="baseDelayMs">Starting delay between requests</label>
+					<span class="input-unit">
+						<input id="baseDelayMs" type="number" min="0.2" step="0.1" />
+						<span class="unit">s</span>
+					</span>
+				</div>
+				<div class="field">
+					<label for="floorDelayMs">Fastest it may ever go</label>
+					<span class="input-unit">
+						<input id="floorDelayMs" type="number" min="0.1" step="0.1" />
+						<span class="unit">s</span>
+					</span>
+				</div>
+				<div class="field">
+					<label for="ceilDelayMs">Slowest it will adapt to on its own</label>
+					<span class="input-unit">
+						<input id="ceilDelayMs" type="number" min="1" step="0.5" />
+						<span class="unit">s</span>
+					</span>
+				</div>
+				<div class="field">
+					<label for="maxRetries">Retries on server or network errors</label>
+					<span class="input-unit">
+						<input id="maxRetries" type="number" min="0" max="10" step="1" />
+						<span class="unit"></span>
+					</span>
+				</div>
+
+				<div class="add-row">
+					<button id="btn-save" class="btn-primary">Save pacing</button>
+					<span id="save-status" class="sub"></span>
+				</div>
+			</section>
+		</div>
+
+		<script type="module" src="options.js"></script>
+	</body>
+</html>

@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<link rel="stylesheet" href="../shared/ui.css" />
+		<link rel="stylesheet" href="popup.css" />
+		<title>Roblox Friend Manager</title>
+	</head>
+	<body>
+		<header>
+			<div class="title">
+				<h1>Friend Manager</h1>
+				<span id="who" class="who">checking...</span>
+			</div>
+			<div id="theme-slot"></div>
+		</header>
+
+		<section id="actions">
+			<button id="btn-accept" class="btn-primary btn-block">
+				Accept all friend requests
+			</button>
+			<button id="btn-unfriend" class="btn-danger btn-block">
+				Unfriend everyone<span id="keep-note" class="btn-note"></span>
+			</button>
+		</section>
+
+		<section id="confirm" class="panel panel-danger hidden">
+			<p id="confirm-text"></p>
+			<div class="row">
+				<button id="btn-confirm" class="btn-danger-solid">Yes, remove them</button>
+				<button id="btn-cancel" class="btn-ghost">Cancel</button>
+			</div>
+		</section>
+
+		<section id="progress" class="panel hidden">
+			<div class="bar"><div id="bar-fill"></div></div>
+			<p id="progress-text" class="mono"></p>
+			<p id="pace" class="sub mono"></p>
+			<p id="backoff" class="warn hidden"></p>
+			<button id="btn-stop" class="btn-ghost btn-block wide">Stop</button>
+		</section>
+
+		<p id="message" class="message hidden"></p>
+
+		<details id="log-box">
+			<summary>Activity log</summary>
+			<div id="log" class="log mono"></div>
+		</details>
+
+		<footer>
+			<a id="open-options" href="#">Settings &amp; keep-list</a>
+			<a id="btn-reset" href="#">Reset</a>
+		</footer>
+
+		<p class="credit">
+			Made with ❤️ by
+			<a href="https://github.com/parritz/" target="_blank" rel="noopener noreferrer">Parritz</a>
+		</p>
+
+		<script type="module" src="popup.js"></script>
+	</body>
+</html>

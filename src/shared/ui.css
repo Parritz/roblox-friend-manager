@@ -1,0 +1,488 @@
+/* Shared design tokens and components for the popup and the options page.
+ *
+ * Neutral by default: grays carry the layout, the primary button is near-black
+ * in light mode and near-white in dark, and the one blue is reserved for focus
+ * rings, checkboxes and row selection. No gradients, no colored shadows.
+ *
+ * Theming works through color-scheme + light-dark(): every token declares its
+ * light and dark value once, and the [data-theme] attribute on <html> decides
+ * which side wins. Native controls follow along for free. */
+
+:root {
+	color-scheme: light dark;
+
+	--bg: light-dark(#ffffff, #0c0d10);
+	--surface: light-dark(#fafafa, #141519);
+	--surface-2: light-dark(#f4f4f5, #1c1e23);
+	--fg: light-dark(#18181b, #ececee);
+	--muted: light-dark(#71717a, #8b8d98);
+	--line: light-dark(#e4e4e7, #26282e);
+	--line-strong: light-dark(#d4d4d8, #35383f);
+
+	/* The only high-contrast fill on either page. */
+	--primary: light-dark(#18181b, #fafafa);
+	--primary-fg: light-dark(#ffffff, #18181b);
+	--primary-hover: light-dark(#2a2a30, #e4e4e7);
+
+	/* Focus, checkboxes, selected rows. Nothing else. */
+	--accent: light-dark(#2563eb, #3b82f6);
+	--accent-tint: light-dark(#f5f8ff, #151b28);
+
+	--danger: light-dark(#dc2626, #f87171);
+	--danger-tint: light-dark(#fef5f5, #1e1416);
+
+	--radius: 6px;
+}
+
+:root[data-theme='light'] {
+	color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+	color-scheme: dark;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+	background: var(--bg);
+	color: var(--fg);
+	font: 13px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
+	-webkit-font-smoothing: antialiased;
+}
+
+h1 {
+	font-size: 14px;
+	font-weight: 600;
+	margin: 0;
+}
+
+h2 {
+	font-size: 13px;
+	font-weight: 600;
+	margin: 0;
+	color: var(--fg);
+}
+
+p {
+	margin: 6px 0 0;
+}
+
+.sub {
+	font-size: 12px;
+	color: var(--muted);
+}
+
+.mono {
+	font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+	font-size: 11px;
+}
+
+.warn {
+	color: var(--danger);
+}
+
+.hidden {
+	display: none !important;
+}
+
+a {
+	color: var(--muted);
+	text-decoration: none;
+}
+
+a:hover {
+	color: var(--fg);
+}
+
+/* -- buttons ------------------------------------------------------------- */
+
+button {
+	font: inherit;
+	font-weight: 500;
+	cursor: pointer;
+	padding: 7px 12px;
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius);
+	color: var(--fg);
+	background: var(--bg);
+	transition: background 100ms ease, border-color 100ms ease, color 100ms ease;
+}
+
+button:hover:not(:disabled) {
+	background: var(--surface-2);
+}
+
+button:disabled {
+	opacity: 0.45;
+	cursor: default;
+}
+
+button:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 1px;
+}
+
+/* Alias kept so markup can say what it means. Same as a bare button. */
+.btn-ghost {
+	background: var(--bg);
+}
+
+.btn-primary {
+	background: var(--primary);
+	border-color: var(--primary);
+	color: var(--primary-fg);
+}
+
+.btn-primary:hover:not(:disabled) {
+	background: var(--primary-hover);
+	border-color: var(--primary-hover);
+}
+
+/* Destructive, but not shouting. Used for the action that opens a confirm step. */
+.btn-danger {
+	color: var(--danger);
+	border-color: var(--line-strong);
+	background: var(--bg);
+}
+
+.btn-danger:hover:not(:disabled) {
+	background: var(--danger-tint);
+	border-color: var(--danger);
+}
+
+/* Only for confirming something already explained. */
+.btn-danger-solid {
+	background: var(--danger);
+	border-color: var(--danger);
+	color: #fff;
+}
+
+.btn-danger-solid:hover:not(:disabled) {
+	filter: brightness(0.94);
+	background: var(--danger);
+}
+
+.btn-sm {
+	padding: 4px 9px;
+	font-size: 12px;
+}
+
+.icon-btn {
+	display: grid;
+	place-items: center;
+	width: 28px;
+	height: 28px;
+	padding: 0;
+	flex: none;
+	color: var(--muted);
+}
+
+.icon-btn:hover:not(:disabled) {
+	color: var(--fg);
+}
+
+.icon-btn svg {
+	width: 14px;
+	height: 14px;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.75;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+.icon-btn.is-spinning svg {
+	animation: spin 900ms linear infinite;
+	transform-origin: center;
+}
+
+@keyframes spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+.btn-block {
+	width: 100%;
+}
+
+/* -- theme switch -------------------------------------------------------- */
+
+.theme-switch {
+	display: inline-flex;
+	padding: 2px;
+	background: var(--surface-2);
+	border: 1px solid var(--line);
+	border-radius: var(--radius);
+	flex: none;
+}
+
+.theme-btn {
+	display: grid;
+	place-items: center;
+	width: 26px;
+	height: 20px;
+	padding: 0;
+	border: 1px solid transparent;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--muted);
+}
+
+.theme-btn svg {
+	width: 13px;
+	height: 13px;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.75;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+.theme-btn:hover:not(.is-active) {
+	background: transparent;
+	color: var(--fg);
+}
+
+.theme-btn.is-active {
+	background: var(--bg);
+	border-color: var(--line-strong);
+	color: var(--fg);
+}
+
+/* -- custom checkbox ----------------------------------------------------- */
+
+.check {
+	appearance: none;
+	margin: 0;
+	flex: none;
+	width: 16px;
+	height: 16px;
+	display: grid;
+	place-content: center;
+	border: 1px solid var(--line-strong);
+	border-radius: 4px;
+	background: var(--bg);
+	cursor: pointer;
+	transition: background 100ms ease, border-color 100ms ease;
+}
+
+.check::after {
+	content: '';
+	width: 9px;
+	height: 9px;
+	background: #fff;
+	transform: scale(0);
+	transition: transform 100ms ease-out;
+	clip-path: polygon(14% 44%, 0 65%, 40% 100%, 100% 16%, 84% 0, 39% 68%);
+}
+
+.check:hover {
+	border-color: var(--accent);
+}
+
+.check:checked {
+	background: var(--accent);
+	border-color: var(--accent);
+}
+
+.check:checked::after {
+	transform: scale(1);
+}
+
+.check:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 1px;
+}
+
+/* -- user rows (avatar + display name + @username + id) ------------------ */
+
+.user-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 6px 8px;
+	border-radius: var(--radius);
+	cursor: pointer;
+	user-select: none;
+}
+
+.user-row:hover {
+	background: var(--surface-2);
+}
+
+.user-row:has(.check:checked) {
+	background: var(--accent-tint);
+}
+
+.avatar {
+	width: 30px;
+	height: 30px;
+	flex: none;
+	border-radius: 50%;
+	object-fit: cover;
+	background: var(--surface-2);
+	border: 1px solid var(--line);
+}
+
+.user-text {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	line-height: 1.35;
+}
+
+.user-display {
+	font-weight: 500;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.user-sub {
+	font-size: 11px;
+	color: var(--muted);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.user-id {
+	font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+}
+
+.user-row.is-unresolved .user-display {
+	color: var(--muted);
+	font-style: italic;
+}
+
+.user-spacer {
+	margin-left: auto;
+}
+
+.tag {
+	flex: none;
+	margin-left: auto;
+	padding: 1px 6px;
+	border: 1px solid var(--line);
+	border-radius: 4px;
+	background: var(--surface-2);
+	color: var(--muted);
+	font-size: 11px;
+	white-space: nowrap;
+}
+
+/* -- notices ------------------------------------------------------------- */
+
+.notice {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	padding: 8px 10px;
+	border: 1px solid var(--line);
+	border-radius: var(--radius);
+	background: var(--surface);
+	font-size: 12px;
+}
+
+.notice-body {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	min-width: 0;
+}
+
+.notice-step {
+	color: var(--muted);
+	word-break: break-word;
+}
+
+.notice-step[data-ok='false'] {
+	color: var(--danger);
+}
+
+.notice.is-error {
+	border-color: var(--danger);
+	background: var(--danger-tint);
+	color: var(--danger);
+}
+
+.notice .user-spacer {
+	margin-left: auto;
+}
+
+/* -- loading skeletons --------------------------------------------------- */
+
+.skeleton-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 6px 8px;
+}
+
+.skeleton {
+	background: var(--surface-2);
+	border-radius: 4px;
+	animation: pulse 1.4s ease-in-out infinite;
+}
+
+.skeleton-box {
+	width: 16px;
+	height: 16px;
+	flex: none;
+}
+
+.skeleton-avatar {
+	width: 30px;
+	height: 30px;
+	border-radius: 50%;
+	flex: none;
+}
+
+.skeleton-line {
+	height: 9px;
+}
+
+@keyframes pulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.45;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.skeleton,
+	.icon-btn.is-spinning svg {
+		animation: none;
+	}
+}
+
+/* -- inputs -------------------------------------------------------------- */
+
+input[type='text'],
+input[type='search'],
+input[type='number'] {
+	padding: 6px 9px;
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius);
+	background: var(--bg);
+	color: var(--fg);
+	font: inherit;
+}
+
+input:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: -1px;
+	border-color: var(--accent);
+}
+
+input::placeholder {
+	color: var(--muted);
+}

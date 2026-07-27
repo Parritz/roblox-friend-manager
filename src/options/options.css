@@ -1,0 +1,123 @@
+/* Options-page layout. Tokens and shared components live in ../shared/ui.css.
+ * One column, section headers, hairline separators. No nested filled cards. */
+
+body {
+	padding: 28px 24px 72px;
+}
+
+.page {
+	max-width: 620px;
+	margin: 0 auto;
+}
+
+header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	padding-bottom: 16px;
+}
+
+.section {
+	padding: 20px 0;
+	border-top: 1px solid var(--line);
+}
+
+.section-head {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.section-hint {
+	margin: 4px 0 0;
+	max-width: 56ch;
+}
+
+/* -- people list ---------------------------------------------------------- */
+
+.list-tools {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-top: 14px;
+}
+
+.list-tools input[type='search'] {
+	flex: 1;
+	min-width: 0;
+}
+
+.people {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	max-height: 380px;
+	overflow-y: auto;
+	margin-top: 8px;
+	padding: 4px;
+	border: 1px solid var(--line);
+	border-radius: var(--radius);
+}
+
+.people .empty {
+	margin: 0;
+	padding: 20px 8px;
+	text-align: center;
+	color: var(--muted);
+}
+
+#notice {
+	margin-top: 14px;
+}
+
+/* -- add row -------------------------------------------------------------- */
+
+.add-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-top: 14px;
+}
+
+.add-row input[type='text'] {
+	flex: 1;
+}
+
+/* -- pacing fields --------------------------------------------------------- */
+
+.field {
+	display: flex;
+	align-items: center;
+	gap: 16px;
+	padding: 7px 0;
+	border-bottom: 1px solid var(--line);
+}
+
+.field:first-of-type {
+	margin-top: 14px;
+	border-top: 1px solid var(--line);
+}
+
+.field label {
+	flex: 1;
+	font-size: 12px;
+}
+
+.input-unit {
+	display: inline-flex;
+	align-items: baseline;
+	gap: 6px;
+}
+
+.input-unit input {
+	width: 92px;
+	text-align: right;
+}
+
+.unit {
+	font-size: 11px;
+	color: var(--muted);
+	width: 16px;
+}
