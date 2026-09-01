@@ -545,6 +545,42 @@ export class RobloxApi {
 		return this.request(url, { signal, kind: 'read' });
 	}
 
+	/**
+	 * User records including account created dates.
+	 *
+	 * POST /v1/users used to return `created` and no longer does - it only has
+	 * id/name/displayName. GET /v1/users/{id} still carries the signup date, so
+	 * that's what accept's "too new" filter has to use. One call per id, paced.
+	 *
+	 * @returns {Promise<Map<number, {id:number, name:string, displayName:string, created:string|null}>>}
+	 */
+	async getUsersById(ids, signal) {
+		const map = new Map();
+		const unique = [...new Set(ids.map(Number).filter(Number.isFinite))];
+		if (!unique.length) return map;
+
+		for (const id of unique) {
+			try {
+				const user = await this.request(`${USERS}/users/${id}`, {
+					signal,
+					kind: 'read',
+					sessionFree: true,
+				});
+				const uid = Number(pickKey(user, ['id', 'userId']));
+				if (!Number.isFinite(uid)) continue;
+				const name = pickKey(user, ['name']) || '';
+				const displayName = pickKey(user, ['displayName']) || name;
+				const created = pickKey(user, ['created', 'createdAt']) || null;
+				map.set(uid, { id: uid, name, displayName, created });
+				if (name) this.cache?.putName(uid, name, displayName);
+			} catch (err) {
+				if (isAbort(err) || err.kind === 'auth' || err.kind === 'notab') throw err;
+				console.warn('[RFM] GET /v1/users/' + id, 'failed:', err.message);
+			}
+		}
+		return map;
+	}
+
 	acceptFriendRequest(userId, signal) {
 		return this.request(`${FRIENDS}/users/${userId}/accept-friend-request`, {
 			method: 'POST',

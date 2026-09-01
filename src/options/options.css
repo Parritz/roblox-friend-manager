@@ -123,5 +123,5 @@ header {
 .unit {
 	font-size: 11px;
 	color: var(--muted);
-	width: 16px;
+	min-width: 16px;
 }

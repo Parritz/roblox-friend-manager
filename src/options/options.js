@@ -5,7 +5,7 @@ const $ = (id) => document.getElementById(id);
 /** Delay settings are stored as ms; the options UI edits them in seconds. */
 const DELAY_FIELDS = ['baseDelayMs', 'floorDelayMs', 'ceilDelayMs', 'readDelayMs'];
 /** Plain integer settings, stored exactly as typed. */
-const COUNT_FIELDS = ['maxRetries', 'autoTrimThreshold', 'autoTrimCount'];
+const COUNT_FIELDS = ['maxRetries', 'autoTrimThreshold', 'autoTrimCount', 'minAccountAgeDays'];
 const SAVE_DEBOUNCE_MS = 400;
 
 /**
@@ -467,10 +467,17 @@ $('username-input').addEventListener('keydown', (e) => {
 	if (e.key === 'Enter') $('btn-add-username').click();
 });
 
+function syncAcceptAgeField() {
+	$('minAccountAgeDays').disabled = !$('skipNewAccounts').checked;
+}
+$('skipNewAccounts').addEventListener('change', syncAcceptAgeField);
+
 $('btn-save').addEventListener('click', async () => {
 	const settings = {
 		autoTrimEnabled: $('autoTrimEnabled').checked,
 		useProxyForPublic: $('useProxyForPublic').checked,
+		skipNewAccounts: $('skipNewAccounts').checked,
+		skipSameDisplayName: $('skipSameDisplayName').checked,
 	};
 
 	for (const field of COUNT_FIELDS) {
@@ -491,6 +498,10 @@ $('btn-save').addEventListener('click', async () => {
 	}
 	if (!(settings.readDelayMs > 0)) {
 		flash($('save-status'), 'Lookup delay must be greater than zero.', 5000);
+		return;
+	}
+	if (!(settings.minAccountAgeDays >= 1)) {
+		flash($('save-status'), 'Minimum account age must be at least 1 day.', 5000);
 		return;
 	}
 	// Auto-trim removes people without asking, so refuse nonsense rather than
@@ -544,6 +555,9 @@ initTheme();
 	for (const field of DELAY_FIELDS) $(field).value = snapshot.settings[field] / 1000;
 	$('autoTrimEnabled').checked = Boolean(snapshot.settings.autoTrimEnabled);
 	$('useProxyForPublic').checked = Boolean(snapshot.settings.useProxyForPublic);
+	$('skipNewAccounts').checked = Boolean(snapshot.settings.skipNewAccounts);
+	$('skipSameDisplayName').checked = Boolean(snapshot.settings.skipSameDisplayName);
+	syncAcceptAgeField();
 
 	await loadFriends();
 	await enrichStrays();

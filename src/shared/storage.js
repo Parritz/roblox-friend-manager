@@ -51,6 +51,20 @@ export const DEFAULT_SETTINGS = {
 
 	// How many to remove per run.
 	autoTrimCount: 100,
+
+	// Accept filters. Off by default so a fresh install keeps accepting everyone;
+	// turning either on is a deliberate choice. Matching filters leave the request
+	// pending rather than declining it. See background/jobs/accept-requests.js.
+	skipNewAccounts: false,
+
+	// Account younger than this many days is "too new". Only used when
+	// skipNewAccounts is on.
+	minAccountAgeDays: 7,
+
+	// Skip requesters whose display name is the same as their username - a common
+	// bot/alt default, since Roblox copies the username into the display name
+	// until the user sets one.
+	skipSameDisplayName: false,
 };
 
 export function emptyJobState() {

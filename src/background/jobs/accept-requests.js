@@ -3,6 +3,8 @@
 import { STATUS } from '../../shared/messages.js';
 import { AbortError, isAbort, sleep } from '../errors.js';
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 // Identical terminal errors in a row that mean "stop, this won't get better".
 const SAME_ERROR_LIMIT = 5;
 
@@ -26,6 +28,74 @@ const WATCH_MAX_MS = 3 * 60_000;
 // stay small over a session that can now run for hours.
 const PROCESSED_LIMIT = 5000;
 
+function namesMatch(name, displayName) {
+	if (!name || !displayName) return false;
+	return name.trim().toLowerCase() === displayName.trim().toLowerCase();
+}
+
+/** Signup time in ms, or null. Friend-request rows and GET /v1/users/{id} both use `created`. */
+function createdMs(obj) {
+	if (!obj || typeof obj !== 'object') return null;
+	const raw = obj.created ?? obj.Created ?? obj.createdAt ?? obj.CreatedAt;
+	if (raw == null || raw === '') return null;
+	const ms = typeof raw === 'number' ? (raw > 0 && raw < 1e12 ? raw * 1000 : raw) : Date.parse(raw);
+	return Number.isFinite(ms) ? ms : null;
+}
+
+function requesterId(item) {
+	const id = Number(item?.id) || Number(item?.friendRequest?.senderId);
+	return Number.isFinite(id) && id > 0 ? id : null;
+}
+
+/** Human-readable account age for the skip log, e.g. "5h" or "3 days". */
+function formatAge(ageMs) {
+	if (!(ageMs >= 0)) return 'unknown age';
+	const hours = Math.floor(ageMs / (60 * 60 * 1000));
+	if (hours < 24) return `${hours}h`;
+	const days = Math.floor(ageMs / DAY_MS);
+	return days === 1 ? '1 day' : `${days} days`;
+}
+
+/**
+ * Why this requester should be left pending, or null to accept.
+ * `details` is the /v1/users row when a lookup ran; name/displayName on the
+ * request itself are enough for the matching-names filter.
+ */
+function skipReason(user, details, settings = {}, now = Date.now()) {
+	const reasons = [];
+	const name = details?.name || user.name || '';
+	const displayName = details?.displayName || user.displayName || '';
+
+	if (settings.skipSameDisplayName && namesMatch(name, displayName)) {
+		reasons.push('display name matches username');
+	}
+
+	if (settings.skipNewAccounts) {
+		const createdAt = createdMs(details) ?? createdMs(user);
+		if (createdAt != null) {
+			const ageMs = now - createdAt;
+			const minMs = Math.max(1, Number(settings.minAccountAgeDays) || 0) * DAY_MS;
+			if (ageMs < minMs) {
+				reasons.push(`account is ${formatAge(ageMs)} old (minimum ${settings.minAccountAgeDays} days)`);
+			}
+		}
+	}
+
+	return reasons.length ? reasons.join('; ') : null;
+}
+
+function filterSummary(settings = {}) {
+	const parts = [];
+	if (settings.skipNewAccounts) {
+		const n = settings.minAccountAgeDays;
+		parts.push(`accounts younger than ${n} day${n === 1 ? '' : 's'}`);
+	}
+	if (settings.skipSameDisplayName) {
+		parts.push('accounts whose display name matches their username');
+	}
+	return parts;
+}
+
 /**
  * One full drain of the request list: passes until a pass accepts nothing, or
  * the count says the queue is empty.
@@ -36,7 +106,7 @@ const PROCESSED_LIMIT = 5000;
  *          that have been tried and refused.
  */
 async function acceptQueued(ctx, processed, { watch }) {
-	const { api, state, signal, log, commit } = ctx;
+	const { api, state, settings = {}, signal, log, commit } = ctx;
 
 	let lastCode = null;
 	let sameCodeRun = 0;
@@ -88,15 +158,52 @@ async function acceptQueued(ctx, processed, { watch }) {
 			const items = page?.data || [];
 			seenThisPass += items.length;
 
+			// POST /v1/users no longer returns signup dates. Use `created` on the
+			// request row when Roblox still sends it; otherwise GET /v1/users/{id}
+			// for anyone the age filter needs and we don't already know.
+			let detailsById = new Map();
+			const fresh = items.filter((user) => requesterId(user) && !processed.has(requesterId(user)));
+			const needLookup = fresh.filter(
+				(user) =>
+					(settings.skipNewAccounts && createdMs(user) == null) ||
+					(settings.skipSameDisplayName && (!user.name || !user.displayName))
+			);
+			if (needLookup.length) {
+				try {
+					detailsById = await api.getUsersById(
+						needLookup.map((user) => requesterId(user)),
+						signal
+					);
+				} catch (err) {
+					if (isAbort(err) || err.kind === 'auth' || err.kind === 'notab') throw err;
+					log('warn', `Could not look up requester details: ${err.message}`);
+				}
+			}
+
 			for (const user of items) {
 				if (signal.aborted) throw new AbortError();
-				if (processed.has(user.id)) continue;
+				const id = requesterId(user);
+				if (!id || processed.has(id)) continue;
 
-				remember(user.id);
-				const label = user.name || `User ${user.id}`;
+				remember(id);
+				const details = detailsById.get(id);
+				const label = details?.name || user.name || `User ${id}`;
+
+				if (settings.skipNewAccounts && createdMs(details) == null && createdMs(user) == null) {
+					log('warn', `No creation date for ${label}; cannot apply age filter.`);
+				}
+
+				const reason = skipReason(user, details, settings);
+				if (reason) {
+					state.skipped++;
+					log('info', `Skipped ${label}: ${reason}`);
+					if (state.total < settled()) state.total = settled();
+					await commit();
+					continue;
+				}
 
 				try {
-					await api.acceptFriendRequest(user.id, signal);
+					await api.acceptFriendRequest(id, signal);
 					state.done++;
 					accepted++;
 					acceptedTotal++;
@@ -171,7 +278,14 @@ async function acceptQueued(ctx, processed, { watch }) {
 			const stuck = left == null ? seenThisPass : left;
 			// In watch mode the caller says this once per idle streak instead - the
 			// same warning every 30s would bury the accepts the log is there for.
-			if (!watch) log('warn', `Stopping: ${stuck} request(s) remain that could not be accepted.`);
+			if (!watch) {
+				log(
+					'warn',
+					state.skipped
+						? `Stopping: ${stuck} request(s) remain that were skipped or could not be accepted.`
+						: `Stopping: ${stuck} request(s) remain that could not be accepted.`
+				);
+			}
 			return { accepted: acceptedTotal, paused: false, stuck };
 		}
 
@@ -210,8 +324,11 @@ async function idleFor(ctx, ms) {
  *        callers that want the queue drained once and then done.
  */
 export async function runAcceptJob(ctx, { watch = false } = {}) {
-	const { state, signal, log, commit } = ctx;
+	const { state, settings, signal, log, commit } = ctx;
 	const processed = new Set(state.processedIds || []);
+
+	const filters = filterSummary(settings);
+	if (filters.length) log('info', `Skipping ${filters.join(', and ')}.`);
 
 	if (!watch) {
 		const round = await acceptQueued(ctx, processed, { watch: false });

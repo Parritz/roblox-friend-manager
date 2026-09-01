@@ -105,6 +105,30 @@
 				</div>
 
 				<div class="section-head section-head-spaced">
+					<h2>Accept filters</h2>
+				</div>
+				<p class="sub section-hint">
+					Incoming friend requests that match a filter are left pending instead of
+					being accepted.
+				</p>
+
+				<div class="field">
+					<label for="skipNewAccounts">Don't accept accounts that are too new</label>
+					<input id="skipNewAccounts" type="checkbox" class="check" />
+				</div>
+				<div class="field">
+					<label for="minAccountAgeDays">Minimum account age</label>
+					<span class="input-unit">
+						<input id="minAccountAgeDays" type="number" min="1" max="3650" step="1" />
+						<span class="unit">days</span>
+					</span>
+				</div>
+				<div class="field">
+					<label for="skipSameDisplayName">Don't accept accounts whose display name matches their username</label>
+					<input id="skipSameDisplayName" type="checkbox" class="check" />
+				</div>
+
+				<div class="section-head section-head-spaced">
 					<h2>Auto-trim</h2>
 				</div>
 				<p class="sub section-hint">
