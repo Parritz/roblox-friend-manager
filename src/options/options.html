@@ -108,8 +108,8 @@
 					<h2>Accept filters</h2>
 				</div>
 				<p class="sub section-hint">
-					Incoming friend requests that match a filter are left pending instead of
-					being accepted.
+					Incoming friend requests that match any enabled filter stay pending unless
+					you turn on declining below. Filters run while accepting is started from the popup.
 				</p>
 
 				<div class="field">
@@ -127,6 +127,16 @@
 					<label for="skipSameDisplayName">Don't accept accounts whose display name matches their username</label>
 					<input id="skipSameDisplayName" type="checkbox" class="check" />
 				</div>
+
+				<div class="field">
+					<label for="declineFilteredRequests">Decline filtered requests</label>
+					<input id="declineFilteredRequests" type="checkbox" class="check" />
+				</div>
+				<p class="sub section-hint">
+					Off by default. When enabled, matching requests are removed instead of left
+					pending. Declining uses the same pacing as friend changes and may cause
+					additional rate-limit pauses.
+				</p>
 
 				<div class="section-head section-head-spaced">
 					<h2>Auto-trim</h2>

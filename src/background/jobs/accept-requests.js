@@ -1,6 +1,7 @@
-// Bulk-accept incoming friend requests.
+// Accept incoming friend requests, optionally declining filter matches.
 
 import { STATUS } from '../../shared/messages.js';
+import { normalizeJobState } from '../../shared/storage.js';
 import { AbortError, isAbort, sleep } from '../errors.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -8,8 +9,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // Identical terminal errors in a row that mean "stop, this won't get better".
 const SAME_ERROR_LIMIT = 5;
 
-// Full-list passes before giving up. A pass must accept at least one request to
-// earn another, so this only caps pathological cases.
+// Full-list passes before giving up. A pass must accept or decline at least
+// one request to earn another, so this only caps pathological cases.
 const MAX_PASSES = 10;
 
 // Runaway guard on the cursor walk, matching the friends-list walk.
@@ -17,12 +18,12 @@ const MAX_PAGES_PER_PASS = 60;
 
 // Gap between watch polls. Starts responsive and eases out while nothing turns
 // up, so an extension left armed all evening isn't asking for the count every
-// 30s for hours. Anything accepted snaps it back to the minimum.
+// 30s for hours. Anything accepted or declined snaps it back to the minimum.
 const WATCH_MIN_MS = 30_000;
 const WATCH_MAX_MS = 3 * 60_000;
 
 // Ceiling on the remembered-id set. Strictly, only ids that *couldn't* be
-// accepted need to stay - an accepted request leaves the list - but the set
+// processed need to stay - accepted and declined requests leave the list - but the set
 // can't tell those apart without risking a re-attempt on a request Roblox hasn't
 // finished removing yet. So it's bounded oldest-first rather than trusted to
 // stay small over a session that can now run for hours.
@@ -57,7 +58,7 @@ function formatAge(ageMs) {
 }
 
 /**
- * Why this requester should be left pending, or null to accept.
+ * Why this requester matches a filter, or null when no match is known.
  * `details` is the /v1/users row when a lookup ran; name/displayName on the
  * request itself are enough for the matching-names filter.
  */
@@ -97,24 +98,47 @@ function filterSummary(settings = {}) {
 }
 
 /**
- * One full drain of the request list: passes until a pass accepts nothing, or
- * the count says the queue is empty.
+ * Drain the request list until a pass makes no accept/decline progress or the
+ * count says the queue is empty.
  *
- * @returns {Promise<{accepted:number, paused:boolean, stuck:number}>}
+ * @returns {Promise<{accepted:number, declined:number, paused:boolean, stuck:number}>}
  *          `paused` means a terminal condition has already set STATUS.PAUSED and
  *          the caller must not carry on. `stuck` counts requests still listed
  *          that have been tried and refused.
  */
 async function acceptQueued(ctx, processed, { watch }) {
-	const { api, state, settings = {}, signal, log, commit } = ctx;
+	const { api, state, signal, log, commit } = ctx;
+	let settings;
+	const syncFilters = async () => {
+		settings = ctx.readSettings ? await ctx.readSettings() : ctx.settings || {};
+		ctx.settings = settings;
+		const key = JSON.stringify([
+			Boolean(settings.skipNewAccounts), Number(settings.minAccountAgeDays),
+			Boolean(settings.skipSameDisplayName), Boolean(settings.declineFilteredRequests),
+		]);
+		if (state.acceptFilterKey !== key) {
+			// A request left pending under old settings must be eligible for
+			// declining after the user changes the filters or the decline toggle.
+			processed.clear();
+			state.processedIds = [];
+			state.acceptFilterKey = key;
+			const filters = filterSummary(settings);
+			log('info', filters.length
+				? `${settings.declineFilteredRequests ? 'Declining' : 'Leaving pending'} ${filters.join(', and ')}.`
+				: 'No request filters enabled; accepting all incoming requests.');
+			await commit();
+		}
+	};
+	await syncFilters();
 
 	let lastCode = null;
 	let sameCodeRun = 0;
-	/** Set by the friend-cap detector to unwind both loops. */
+	/** Set after repeated terminal errors to unwind both loops. */
 	let paused = false;
 	let acceptedTotal = 0;
+	let declinedTotal = 0;
 
-	const settled = () => state.done + state.skipped + state.failed;
+	const settled = () => state.done + state.declined + state.skipped + state.failed;
 
 	const remember = (id) => {
 		processed.add(id);
@@ -138,12 +162,13 @@ async function acceptQueued(ctx, processed, { watch }) {
 		if (isAbort(err) || err.kind === 'auth' || err.kind === 'notab') throw err;
 	}
 
-	if (pending === 0) return { accepted: 0, paused: false, stuck: 0 };
+	if (pending === 0) return { accepted: 0, declined: 0, paused: false, stuck: 0 };
 
 	for (let pass = 1; pass <= MAX_PASSES && !paused; pass++) {
 		if (signal.aborted) throw new AbortError();
 
 		let accepted = 0;
+		let declined = 0;
 		let seenThisPass = 0;
 		let cursor = '';
 		let pages = 0;
@@ -153,102 +178,121 @@ async function acceptQueued(ctx, processed, { watch }) {
 		// request that can never be accepted costs one page read, not the whole job.
 		do {
 			if (signal.aborted) throw new AbortError();
+			await syncFilters();
 
 			const page = await api.getIncomingRequests(cursor, signal);
 			const items = page?.data || [];
 			seenThisPass += items.length;
-
-			// POST /v1/users no longer returns signup dates. Use `created` on the
-			// request row when Roblox still sends it; otherwise GET /v1/users/{id}
-			// for anyone the age filter needs and we don't already know.
-			let detailsById = new Map();
-			const fresh = items.filter((user) => requesterId(user) && !processed.has(requesterId(user)));
-			const needLookup = fresh.filter(
-				(user) =>
-					(settings.skipNewAccounts && createdMs(user) == null) ||
-					(settings.skipSameDisplayName && (!user.name || !user.displayName))
-			);
-			if (needLookup.length) {
-				try {
-					detailsById = await api.getUsersById(
-						needLookup.map((user) => requesterId(user)),
-						signal
-					);
-				} catch (err) {
-					if (isAbort(err) || err.kind === 'auth' || err.kind === 'notab') throw err;
-					log('warn', `Could not look up requester details: ${err.message}`);
-				}
-			}
 
 			for (const user of items) {
 				if (signal.aborted) throw new AbortError();
 				const id = requesterId(user);
 				if (!id || processed.has(id)) continue;
 
-				remember(id);
-				const details = detailsById.get(id);
+				// Any confirmed match is enough to skip/decline. Fetch missing
+				// details only when needed, and act before looking up the next user.
+				let details;
+				const needsDetails = !skipReason(user, null, settings) && (
+					(settings.skipNewAccounts && createdMs(user) == null) ||
+					(settings.skipSameDisplayName && (!user.name || !user.displayName))
+				);
+				if (needsDetails) {
+					try {
+						details = (await api.getUsersById([id], signal)).get(id);
+					} catch (err) {
+						if (isAbort(err) || err.kind === 'auth' || err.kind === 'notab') throw err;
+						log('warn', `Could not look up requester ${id}: ${err.message}`);
+					}
+				}
 				const label = details?.name || user.name || `User ${id}`;
 
-				if (settings.skipNewAccounts && createdMs(details) == null && createdMs(user) == null) {
-					log('warn', `No creation date for ${label}; cannot apply age filter.`);
-				}
-
 				const reason = skipReason(user, details, settings);
-				if (reason) {
+				const missingAge =
+					settings.skipNewAccounts && createdMs(details) == null && createdMs(user) == null;
+				const missingNames =
+					settings.skipSameDisplayName &&
+					(!(details?.name || user.name) || !(details?.displayName || user.displayName));
+				if ((reason && !settings.declineFilteredRequests) || (!reason && (missingAge || missingNames))) {
 					state.skipped++;
-					log('info', `Skipped ${label}: ${reason}`);
+					remember(id);
+					log(
+						reason ? 'info' : 'warn',
+						reason
+							? `Left pending ${label}: ${reason}`
+							: `Left pending ${label}: missing account details for enabled filters.`
+					);
 					if (state.total < settled()) state.total = settled();
 					await commit();
 					continue;
 				}
 
+				const declining = Boolean(reason && settings.declineFilteredRequests);
 				try {
-					await api.acceptFriendRequest(id, signal);
-					state.done++;
-					accepted++;
-					acceptedTotal++;
+					if (declining) {
+						await api.declineFriendRequest(id, signal);
+						state.declined++;
+						declined++;
+						declinedTotal++;
+						log('info', `Declined ${label}: ${reason}`);
+					} else {
+						await api.acceptFriendRequest(id, signal);
+						state.done++;
+						accepted++;
+						acceptedTotal++;
+						log('info', `Accepted ${label}`);
+					}
 					sameCodeRun = 0;
 					lastCode = null;
-					log('info', `Accepted ${label}`);
 				} catch (err) {
 					if (isAbort(err) || err.kind === 'auth' || err.kind === 'notab') throw err;
 
-					if (err.kind === 'terminal') {
+					// A listed request can disappear before we act on it. This is
+					// an item to skip, not evidence that subsequent actions will fail.
+					if (err.kind === 'terminal' &&
+						(Number(err.code) === 10 || /\bthe friend request does not exist\b/i.test(err.message))) {
 						state.skipped++;
+						sameCodeRun = 0;
+						lastCode = null;
+						log('info', `Skipped ${label}: the friend request does not exist; continuing.`);
+					} else if (err.kind === 'terminal') {
+						if (declining) state.failed++;
+						else state.skipped++;
 						log(
 							'warn',
-							`Skipped ${label}: ${err.message}${err.code != null ? ` (code ${err.code})` : ''}`
+							`Could not ${declining ? 'decline' : 'accept'} ${label}: ${err.message}` +
+								`${err.code != null ? ` (code ${err.code})` : ''}`
 						);
 
-						// The friend cap is the case that matters here: once it's hit, every
-						// remaining accept fails identically, and grinding through hundreds of
-						// guaranteed failures is both pointless and a great way to get flagged.
-						if (err.code != null && err.code === lastCode) sameCodeRun++;
+						// Do not grind through identical failures. Keep decline errors
+						// separate from accept errors (which can mean the friend cap).
+						const codeKey = err.code == null ? null : `${declining}:${err.code}`;
+						if (codeKey != null && codeKey === lastCode) sameCodeRun++;
 						else {
-							lastCode = err.code;
+							lastCode = codeKey;
 							sameCodeRun = 1;
 						}
 						if (sameCodeRun >= SAME_ERROR_LIMIT) {
 							state.status = STATUS.PAUSED;
 							state.message =
-								`Paused: ${SAME_ERROR_LIMIT} accepts in a row failed the same way ` +
-								`(code ${err.code}: ${err.message}). If you're at Roblox's friend limit, ` +
-								`run Unfriend first.`;
-							await commit();
+								`Paused: ${SAME_ERROR_LIMIT} ${declining ? 'declines' : 'accepts'} in a row failed the same way ` +
+								`(code ${err.code}: ${err.message}).` +
+								(declining ? ' Check the activity log before restarting.' :
+									` If you're at Roblox's friend limit, run Unfriend first.`);
 							paused = true;
-							break;
 						}
 					} else {
 						state.failed++;
-						log('error', `Failed ${label}: ${err.message}`);
+						log('error', `Failed to ${declining ? 'decline' : 'accept'} ${label}: ${err.message}`);
 					}
 				}
 
+				remember(id);
 				if (state.total < settled()) state.total = settled();
 				await commit();
+				if (paused) break;
 			}
 
-			if (paused) return { accepted: acceptedTotal, paused: true, stuck: 0 };
+			if (paused) return { accepted: acceptedTotal, declined: declinedTotal, paused: true, stuck: 0 };
 
 			cursor = page?.nextPageCursor || page?.NextCursor || '';
 			if (cursor && seenCursors.has(cursor)) {
@@ -258,10 +302,10 @@ async function acceptQueued(ctx, processed, { watch }) {
 			seenCursors.add(cursor);
 		} while (cursor && ++pages < MAX_PAGES_PER_PASS);
 
-		if (seenThisPass === 0) return { accepted: acceptedTotal, paused: false, stuck: 0 };
+		if (seenThisPass === 0) return { accepted: acceptedTotal, declined: declinedTotal, paused: false, stuck: 0 };
 
-		// Accepting shifts the list under the cursor, so one clean walk isn't proof
-		// the list is empty. The count settles it.
+		// Accepting or declining shifts the list under the cursor. One clean walk
+		// isn't proof the list is empty; the count settles it.
 		let left = null;
 		try {
 			left = await api.getPendingRequestCount(signal);
@@ -270,11 +314,11 @@ async function acceptQueued(ctx, processed, { watch }) {
 			log('warn', `Could not verify the remaining request count: ${err.message}`);
 		}
 
-		if (left === 0) return { accepted: acceptedTotal, paused: false, stuck: 0 };
+		if (left === 0) return { accepted: acceptedTotal, declined: declinedTotal, paused: false, stuck: 0 };
 
-		if (accepted === 0) {
-			// A whole pass with nothing accepted means everything still listed has
-			// already been tried and refused. Repeating the walk would change nothing.
+		if (accepted + declined === 0) {
+			// A pass with nothing accepted or declined means the remaining requests
+			// have already been handled. Repeating the walk would change nothing.
 			const stuck = left == null ? seenThisPass : left;
 			// In watch mode the caller says this once per idle streak instead - the
 			// same warning every 30s would bury the accepts the log is there for.
@@ -282,17 +326,17 @@ async function acceptQueued(ctx, processed, { watch }) {
 				log(
 					'warn',
 					state.skipped
-						? `Stopping: ${stuck} request(s) remain that were skipped or could not be accepted.`
-						: `Stopping: ${stuck} request(s) remain that could not be accepted.`
+						? `Stopping: ${stuck} request(s) remain that were skipped or could not be processed.`
+						: `Stopping: ${stuck} request(s) remain that could not be processed.`
 				);
 			}
-			return { accepted: acceptedTotal, paused: false, stuck };
+			return { accepted: acceptedTotal, declined: declinedTotal, paused: false, stuck };
 		}
 
 		if (left != null) {
 			state.total = settled() + left;
 			await commit();
-			log('info', `Pass ${pass} accepted ${accepted}; ${left} still pending.`);
+			log('info', `Pass ${pass} accepted ${accepted}, declined ${declined}; ${left} still pending.`);
 		}
 	}
 
@@ -300,7 +344,7 @@ async function acceptQueued(ctx, processed, { watch }) {
 		log('warn', `Stopped after ${MAX_PASSES} passes. Run Accept again to continue.`);
 	}
 	if (signal.aborted) throw new AbortError();
-	return { accepted: acceptedTotal, paused: false, stuck: 0 };
+	return { accepted: acceptedTotal, declined: declinedTotal, paused: false, stuck: 0 };
 }
 
 /**
@@ -324,15 +368,13 @@ async function idleFor(ctx, ms) {
  *        callers that want the queue drained once and then done.
  */
 export async function runAcceptJob(ctx, { watch = false } = {}) {
-	const { state, settings, signal, log, commit } = ctx;
+	const { state, signal, log, commit } = ctx;
+	Object.assign(state, normalizeJobState(state));
 	const processed = new Set(state.processedIds || []);
-
-	const filters = filterSummary(settings);
-	if (filters.length) log('info', `Skipping ${filters.join(', and ')}.`);
 
 	if (!watch) {
 		const round = await acceptQueued(ctx, processed, { watch: false });
-		if (!round.paused && !round.accepted && !round.stuck) log('info', 'No friend requests to accept.');
+		if (!round.paused && !round.accepted && !round.declined && !round.stuck) log('info', 'No friend requests to process.');
 		return;
 	}
 
@@ -360,7 +402,7 @@ export async function runAcceptJob(ctx, { watch = false } = {}) {
 		const round = await acceptQueued(ctx, processed, { watch: true });
 		if (round.paused) return; // friend cap and friends: STATUS.PAUSED is already set
 
-		if (round.accepted > 0) {
+		if (round.accepted + round.declined > 0) {
 			idle = WATCH_MIN_MS;
 			announcedIdle = false;
 		} else {
@@ -369,7 +411,7 @@ export async function runAcceptJob(ctx, { watch = false } = {}) {
 				log(
 					'info',
 					round.stuck
-						? `Nothing new. ${round.stuck} request(s) here can't be accepted; still watching.`
+						? `Nothing new. ${round.stuck} request(s) remain pending; still watching.`
 						: 'No friend requests waiting; still watching.'
 				);
 				announcedIdle = true;

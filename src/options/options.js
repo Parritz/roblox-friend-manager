@@ -476,9 +476,14 @@ $('btn-save').addEventListener('click', async () => {
 	const settings = {
 		autoTrimEnabled: $('autoTrimEnabled').checked,
 		useProxyForPublic: $('useProxyForPublic').checked,
+		declineFilteredRequests: $('declineFilteredRequests').checked,
 		skipNewAccounts: $('skipNewAccounts').checked,
 		skipSameDisplayName: $('skipSameDisplayName').checked,
 	};
+	if (settings.declineFilteredRequests && !settings.skipNewAccounts && !settings.skipSameDisplayName) {
+		flash($('save-status'), 'Enable at least one accept filter to decline matching requests.', 6000);
+		return;
+	}
 
 	for (const field of COUNT_FIELDS) {
 		settings[field] = Math.round(Number($(field).value));
@@ -525,8 +530,17 @@ $('btn-save').addEventListener('click', async () => {
 		}
 	}
 
-	await send({ type: MSG.SAVE_SETTINGS, settings });
-	flash($('save-status'), 'Saved. Takes effect on the next job.');
+	const snapshot = await send({ type: MSG.GET_STATE });
+	if (!snapshot?.capabilities?.declineFilteredRequests) {
+		flash($('save-status'), 'Reload this extension in chrome://extensions before saving the updated filters.', 10000);
+		return;
+	}
+	const result = await send({ type: MSG.SAVE_SETTINGS, settings });
+	if (result?.error || !result?.settings) {
+		flash($('save-status'), result?.error || 'Settings could not be saved. Try again.', 6000);
+		return;
+	}
+	flash($('save-status'), 'Saved. Filters apply on the next page or poll; pacing applies on the next job.', 6000);
 });
 
 // -- init -----------------------------------------------------------------------------
@@ -555,6 +569,7 @@ initTheme();
 	for (const field of DELAY_FIELDS) $(field).value = snapshot.settings[field] / 1000;
 	$('autoTrimEnabled').checked = Boolean(snapshot.settings.autoTrimEnabled);
 	$('useProxyForPublic').checked = Boolean(snapshot.settings.useProxyForPublic);
+	$('declineFilteredRequests').checked = Boolean(snapshot.settings.declineFilteredRequests);
 	$('skipNewAccounts').checked = Boolean(snapshot.settings.skipNewAccounts);
 	$('skipSameDisplayName').checked = Boolean(snapshot.settings.skipSameDisplayName);
 	syncAcceptAgeField();

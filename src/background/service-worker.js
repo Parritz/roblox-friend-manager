@@ -188,6 +188,7 @@ async function startJob(jobType, { confirmed = false, watch = false } = {}) {
 		limiter,
 		state,
 		settings,
+		readSettings: store.getSettings,
 		cache: userCache,
 		keepList: await store.getKeepList(),
 		signal: controller.signal,
@@ -401,7 +402,8 @@ async function syncAutoTrimAlarm() {
 }
 
 function summarize(state) {
-	const parts = [`${state.done} done`];
+	const parts = [`${state.done} ${state.jobType === JOB.ACCEPT ? 'accepted' : 'done'}`];
+	if (state.declined) parts.push(`${state.declined} declined`);
 	if (state.skipped) parts.push(`${state.skipped} skipped`);
 	if (state.failed) parts.push(`${state.failed} failed`);
 	if (state.rateLimitHits) parts.push(`${state.rateLimitHits} rate-limit pauses`);
@@ -441,6 +443,7 @@ async function handle(msg) {
 				log: await store.getLog(),
 				keepList: await store.getKeepList(),
 				settings: await store.getSettings(),
+				capabilities: { declineFilteredRequests: true },
 				transport: transportMode(),
 			};
 

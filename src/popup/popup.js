@@ -3,6 +3,7 @@
 // because popups get torn down the moment they lose focus.
 
 import { MSG, JOB, STATUS, ACTIVE_STATUSES } from '../shared/messages.js';
+import { normalizeJobState } from '../shared/storage.js';
 import { initTheme, themeSwitchHtml } from '../shared/theme.js';
 
 const $ = (id) => document.getElementById(id);
@@ -34,7 +35,13 @@ function send(message) {
 
 // -- rendering ---------------------------------------------------------------
 
-function render({ state, log, keepList }) {
+function render({ state, log, keepList, capabilities }) {
+	state = normalizeJobState(state);
+	const needsReload = !capabilities?.declineFilteredRequests;
+	$('update-notice').classList.toggle('hidden', !needsReload);
+	$('update-notice').textContent = needsReload
+		? 'Reload this extension in chrome://extensions to activate the updated request filters.'
+		: '';
 	const active = ACTIVE_STATUSES.includes(state.status);
 	const awaiting = state.status === STATUS.AWAITING_CONFIRM;
 	// The accept button is a toggle, so while its own job is running it stays
@@ -48,7 +55,7 @@ function render({ state, log, keepList }) {
 	el.accept.classList.toggle('btn-primary', !accepting);
 	el.accept.classList.toggle('btn-ghost', accepting);
 	el.accept.classList.toggle('is-watching', accepting);
-	el.accept.disabled = (active && !accepting) || awaiting;
+	el.accept.disabled = (active && !accepting) || awaiting || (needsReload && !accepting);
 	el.unfriend.disabled = active || awaiting;
 
 	el.confirm.classList.toggle('hidden', !awaiting);
@@ -60,9 +67,10 @@ function render({ state, log, keepList }) {
 
 	el.progress.classList.toggle('hidden', !active);
 	if (active) {
-		const attempted = state.done + state.skipped + state.failed;
+		const attempted = state.done + state.declined + state.skipped + state.failed;
 
-		const counts = [`${state.done} done`];
+		const counts = [`${state.done} ${state.jobType === JOB.ACCEPT ? 'accepted' : 'done'}`];
+		if (state.declined) counts.push(`${state.declined} declined`);
 		if (state.skipped) counts.push(`${state.skipped} skipped`);
 		if (state.failed) counts.push(`${state.failed} failed`);
 
@@ -179,6 +187,10 @@ el.accept.addEventListener('click', async () => {
 	const snapshot = await send({ type: MSG.GET_STATE });
 	const accepting =
 		ACTIVE_STATUSES.includes(snapshot?.state?.status) && snapshot.state.jobType === JOB.ACCEPT;
+	if (!accepting && !snapshot?.capabilities?.declineFilteredRequests) {
+		render(snapshot);
+		return;
+	}
 
 	await send(accepting ? { type: MSG.STOP_JOB } : { type: MSG.START_JOB, jobType: JOB.ACCEPT, watch: true });
 	refresh();

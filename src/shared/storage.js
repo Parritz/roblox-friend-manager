@@ -53,8 +53,8 @@ export const DEFAULT_SETTINGS = {
 	autoTrimCount: 100,
 
 	// Accept filters. Off by default so a fresh install keeps accepting everyone;
-	// turning either on is a deliberate choice. Matching filters leave the request
-	// pending rather than declining it. See background/jobs/accept-requests.js.
+	// turning either on is a deliberate choice. Matching requests stay pending
+	// unless declineFilteredRequests is also enabled. See background/jobs/accept-requests.js.
 	skipNewAccounts: false,
 
 	// Account younger than this many days is "too new". Only used when
@@ -65,6 +65,10 @@ export const DEFAULT_SETTINGS = {
 	// bot/alt default, since Roblox copies the username into the display name
 	// until the user sets one.
 	skipSameDisplayName: false,
+
+	// Opt in to removing requests that match an enabled filter. Declines share
+	// the write limiter with accepts and unfriends, and may add rate-limit pauses.
+	declineFilteredRequests: false,
 };
 
 export function emptyJobState() {
@@ -74,6 +78,7 @@ export function emptyJobState() {
 		message: '',
 		total: 0,
 		done: 0,
+		declined: 0,
 		skipped: 0,
 		failed: 0,
 		keptCount: 0,
@@ -84,6 +89,9 @@ export function emptyJobState() {
 		// Friend-request ids already attempted this run, so a permanently failing
 		// request can't be re-enqueued forever.
 		processedIds: [],
+		// Filters used when processedIds was built, so a changed filter can
+		// reconsider requests previously left pending, including after a resume.
+		acceptFilterKey: null,
 		// Accept job only: armed to keep watching for new requests rather than
 		// finishing when the queue empties. Persisted because it has to survive a
 		// service-worker eviction - see resumeIfNeeded.
@@ -144,13 +152,24 @@ export async function saveKeepList(list) {
 	return clean;
 }
 
+/** Upgrade old checkpoints and repair invalid counters before doing arithmetic. */
+export function normalizeJobState(state) {
+	const next = { ...emptyJobState(), ...state };
+	for (const field of ['total', 'done', 'declined', 'skipped', 'failed', 'keptCount', 'rateLimitHits']) {
+		const value = Number(next[field]);
+		next[field] = Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
+	}
+	return next;
+}
+
 export async function getJobState() {
-	return { ...emptyJobState(), ...(await get(KEYS.JOB, {})) };
+	return normalizeJobState(await get(KEYS.JOB, {}));
 }
 
 export async function saveJobState(state) {
-	await chrome.storage.local.set({ [KEYS.JOB]: state });
-	return state;
+	const next = normalizeJobState(state);
+	await chrome.storage.local.set({ [KEYS.JOB]: next });
+	return next;
 }
 
 export async function getLog() {

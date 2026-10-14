@@ -15,8 +15,8 @@ Roblox.
 The extension never reads, copies or stores your `.ROBLOSECURITY` cookie. It uses the same session that's already there.<br/>
 Keep a roblox.com tab open; depending on your Chrome version it may need one.
 
-- **Start accepting friend requests** - a toggle. Accepts everyone waiting, paced,
-  then stays armed: it keeps re-checking and accepts new requests as they arrive.
+- **Start accepting friend requests** - a toggle. Accepts requests that pass your
+  filters, paced, then stays armed: it keeps re-checking and accepts new requests as they arrive.
   Press it again (or **Stop**) to disarm. While idle it checks every 30s, easing out
   to every 3 minutes if nothing turns up, and snapping back the moment someone does.
 - **Unfriend everyone** - scans your friends list first, shows *"remove N, keep M"*,

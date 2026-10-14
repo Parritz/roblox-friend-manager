@@ -217,7 +217,7 @@ export class RobloxApi {
 
 	/**
 	 * @param {{method?:string, json?:object|null, signal?:AbortSignal, kind?:'read'|'write',
-	 *          sessionFree?:boolean, proxyAuth?:boolean}} [opts]
+	 *          sessionFree?:boolean, proxyAuth?:boolean, preferOrigin?:boolean}} [opts]
 	 *        `kind` picks which limiter pace gates the call. It is not derived from
 	 *        the method: POST /v1/users is a bulk *lookup*, while the only real
 	 *        mutations are unfriend and accept-friend-request. Defaults to 'write',
@@ -226,11 +226,16 @@ export class RobloxApi {
 	 *        `sessionFree` - name/avatar lookups: proxies without cookies/CSRF.
 	 *        `proxyAuth` - accept/unfriend: owned proxies with .ROBLOSECURITY + CSRF.
 	 *        Friends list reads stay on roblox.com either way.
+	 *        `preferOrigin` tries Roblox first for filter details and declines,
+	 *        retaining proxies as fallback without waiting for their cold starts.
 	 */
 	async request(url, opts = {}) {
 		const wantProxy = (opts.sessionFree || opts.proxyAuth) && this.proxy?.usable;
 		if (wantProxy) {
 			const routes = this.proxy.routesFor(url);
+			if (opts.preferOrigin) {
+				routes.sort((a, b) => Number(a.viaProxy) - Number(b.viaProxy));
+			}
 			if (routes.length) {
 				const [primary, ...rest] = routes;
 				try {
@@ -246,8 +251,10 @@ export class RobloxApi {
 					// has no business returning - means that mirror is misbehaving, so try
 					// remaining routes (usually roblox.com) once more if _send didn't.
 					if (isAbort(err)) throw err;
-					if (primary.viaProxy) {
-						this.proxy.noteFailure(primary.id, primary.url, err);
+					// A real Roblox item/auth error should reach the job immediately.
+					if (!primary.viaProxy && (err.kind === 'terminal' || err.kind === 'auth')) throw err;
+					if (primary.viaProxy || opts.preferOrigin) {
+						if (primary.viaProxy) this.proxy.noteFailure(primary.id, primary.url, err);
 						const leftover = rest.filter((r) => r.id === 'origin' || r.viaProxy);
 						for (const next of leftover) {
 							try {
@@ -565,11 +572,12 @@ export class RobloxApi {
 					signal,
 					kind: 'read',
 					sessionFree: true,
+					preferOrigin: true,
 				});
 				const uid = Number(pickKey(user, ['id', 'userId']));
 				if (!Number.isFinite(uid)) continue;
 				const name = pickKey(user, ['name']) || '';
-				const displayName = pickKey(user, ['displayName']) || name;
+				const displayName = pickKey(user, ['displayName']) || '';
 				const created = pickKey(user, ['created', 'createdAt']) || null;
 				map.set(uid, { id: uid, name, displayName, created });
 				if (name) this.cache?.putName(uid, name, displayName);
@@ -586,6 +594,15 @@ export class RobloxApi {
 			method: 'POST',
 			signal,
 			proxyAuth: true,
+		});
+	}
+
+	declineFriendRequest(userId, signal) {
+		return this.request(`${FRIENDS}/users/${userId}/decline-friend-request`, {
+			method: 'POST',
+			signal,
+			proxyAuth: true,
+			preferOrigin: true,
 		});
 	}
 

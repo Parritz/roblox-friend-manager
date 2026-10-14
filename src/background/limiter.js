@@ -35,7 +35,7 @@ export class Limiter {
 	/**
 	 * One pace per traffic class, each adapting independently.
 	 *
-	 * Writes (unfriend, accept) share a single cautious pace. Reads get one pace
+	 * Writes (unfriend, accept, decline) share a single cautious pace. Reads get one pace
 	 * *per host*, because Roblox's limits are clearly per-endpoint, not global:
 	 * observed 429s arrive with the published budget almost untouched, and in
 	 * practice users.roblox.com starts refusing batch lookups at a pace that
